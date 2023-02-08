@@ -1,0 +1,6 @@
+/application/__pycache__/**
+/utils/__pycache__/**
+.idea/**
+/models/**
+/training_log.txt
+/resources/**

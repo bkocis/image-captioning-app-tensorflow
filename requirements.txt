@@ -1,0 +1,5 @@
+
+tensorflow_text
+tensorflow
+tensorflow_datasets
+einops
