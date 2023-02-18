@@ -1,6 +1,11 @@
 /application/__pycache__/**
 /utils/__pycache__/**
+/training/__pycache__/**
 .idea/**
 /models/**
 /training_log.txt
 /resources/**
+
+/training/flickr8k 
+/training/test_cache/
+/training/train_cache/

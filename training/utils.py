@@ -1,138 +1,33 @@
 import concurrent.futures
 import collections
-import dataclasses
 import hashlib
 import itertools
-import json
-import math
-import os
 import pathlib
-import random
 import re
 import string
-import time
-import urllib.request
-
 import einops
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from PIL import Image
 import requests
 import tqdm
-
 import tensorflow as tf
-import tensorflow_hub as hub
-import tensorflow_text as text
-import tensorflow_datasets as tfds
 
-
-class SeqEmbedding(tf.keras.layers.Layer):
-    def __init__(self, vocab_size, max_length, depth):
-        super().__init__()
-        self.pos_embedding = tf.keras.layers.Embedding(input_dim=max_length, output_dim=depth)
-
-        self.token_embedding = tf.keras.layers.Embedding(
-            input_dim=vocab_size,
-            output_dim=depth,
-            mask_zero=True)
-
-        self.add = tf.keras.layers.Add()
-
-    def call(self, seq):
-        seq = self.token_embedding(seq)  # (batch, seq, depth)
-
-        x = tf.range(tf.shape(seq)[1])  # (seq)
-        x = x[tf.newaxis, :]  # (1, seq)
-        x = self.pos_embedding(x)  # (1, seq, depth)
-
-        return self.add([seq, x])
-
-
-class CausalSelfAttention(tf.keras.layers.Layer):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.mha = tf.keras.layers.MultiHeadAttention(**kwargs)
-        # Use Add instead of + so the keras mask propagates through.
-        self.add = tf.keras.layers.Add()
-        self.layernorm = tf.keras.layers.LayerNormalization()
-
-    def call(self, x):
-        attn = self.mha(query=x, value=x,
-                        use_causal_mask=True)
-        x = self.add([x, attn])
-        return self.layernorm(x)
-
-
-class CrossAttention(tf.keras.layers.Layer):
-    def __init__(self, **kwargs):
-        super().__init__()
-        self.mha = tf.keras.layers.MultiHeadAttention(**kwargs)
-        self.add = tf.keras.layers.Add()
-        self.layernorm = tf.keras.layers.LayerNormalization()
-
-    def call(self, x, y, **kwargs):
-        attn, attention_scores = self.mha(
-            query=x, value=y,
-            return_attention_scores=True)
-
-        self.last_attention_scores = attention_scores
-
-        x = self.add([x, attn])
-        return self.layernorm(x)
-
-
-class FeedForward(tf.keras.layers.Layer):
-    def __init__(self, units, dropout_rate=0.1):
-        super().__init__()
-        self.seq = tf.keras.Sequential([
-            tf.keras.layers.Dense(units=2 * units, activation='relu'),
-            tf.keras.layers.Dense(units=units),
-            tf.keras.layers.Dropout(rate=dropout_rate),
-        ])
-
-        self.layernorm = tf.keras.layers.LayerNormalization()
-
-    def call(self, x):
-        x = x + self.seq(x)
-        return self.layernorm(x)
-
-
-class DecoderLayer(tf.keras.layers.Layer):
-    def __init__(self, units, num_heads=1, dropout_rate=0.1):
-        super().__init__()
-
-        self.self_attention = CausalSelfAttention(num_heads=num_heads,
-                                                  key_dim=units,
-                                                  dropout=dropout_rate)
-        self.cross_attention = CrossAttention(num_heads=num_heads,
-                                              key_dim=units,
-                                              dropout=dropout_rate)
-        self.ff = FeedForward(units=units, dropout_rate=dropout_rate)
-
-    def call(self, inputs, training=False):
-        in_seq, out_seq = inputs
-
-        # Text input
-        out_seq = self.self_attention(out_seq)
-
-        out_seq = self.cross_attention(out_seq, in_seq)
-
-        self.last_attention_scores = self.cross_attention.last_attention_scores
-
-        out_seq = self.ff(out_seq)
-
-        return out_seq
-
-
-#####
 
 class TrainerClass:
+
+    def __init__(self):
+        self.IMAGE_SHAPE = (224, 224, 3)
+
+    def tokenizer(self):
+        vocabulary_size = 5000
+        tokenizer = tf.keras.layers.TextVectorization(
+            max_tokens=vocabulary_size,
+            standardize=self.standardize,
+            ragged=True)
+        return tokenizer
 
     def load_image(self, image_path):
         img = tf.io.read_file(image_path)
         img = tf.io.decode_jpeg(img, channels=3)
-        img = tf.image.resize(img, IMAGE_SHAPE[:-1])
+        img = tf.image.resize(img, self.IMAGE_SHAPE[:-1])
         return img
 
     def standardize(self, s):
@@ -150,6 +45,7 @@ class TrainerClass:
         return images, captions
 
     def prepare_txt(self, images, texts):
+        tokenizer = self.tokenizer()
         tokens = tokenizer(texts)
 
         input_tokens = tokens[..., :-1]
@@ -334,50 +230,3 @@ class TrainerClass:
               .padded_batch(batch_size)
               .prefetch(tf.data.AUTOTUNE))
         return ds
-
-
-if __name__ == '__main__':
-    trainer = TrainerClass()
-
-    choose = 'flickr8k'
-
-    if choose == 'flickr8k':
-        train_raw, test_raw = trainer.flickr8k()
-    else:
-        train_raw, test_raw = trainer.conceptual_captions(num_train=10000, num_val=5000)
-
-    # feature extractor
-    IMAGE_SHAPE = (224, 224, 3)
-    mobilenet = tf.keras.applications.MobileNetV3Small(
-        input_shape=IMAGE_SHAPE,
-        include_top=False,
-        include_preprocessing=True)
-    mobilenet.trainable = False
-
-    # test_img_batch = trainer.load_image(ex_path)[tf.newaxis, :]
-
-    # tokenizer
-    vocabulary_size = 5000
-    tokenizer = tf.keras.layers.TextVectorization(
-        max_tokens=vocabulary_size,
-        standardize=trainer.standardize,
-        ragged=True)
-    tokenizer.adapt(train_raw.map(lambda fp, txt: txt).unbatch().batch(1024))
-
-    # mapper for words to indices and indices to words.
-    word_to_index = tf.keras.layers.StringLookup(
-        mask_token="",
-        vocabulary=tokenizer.get_vocabulary())
-    index_to_word = tf.keras.layers.StringLookup(
-        mask_token="",
-        vocabulary=tokenizer.get_vocabulary(),
-        invert=True)
-
-    train_ds = trainer.prepare_dataset(train_raw, tokenizer)
-    test_ds = trainer.prepare_dataset(test_raw, tokenizer)
-
-    trainer.save_dataset(train_raw, 'train_cache', mobilenet, tokenizer)
-    trainer.save_dataset(test_raw, 'test_cache', mobilenet, tokenizer)
-
-    train_ds = trainer.load_dataset('train_cache')
-    test_ds = trainer.load_dataset('test_cache')
