@@ -4,8 +4,10 @@ from utils import TrainerClass
 
 class TrainModel:
 
-    def __init__(self, model):
+    def __init__(self, model, train_ds, test_ds):
         self.model = model
+        self.train_ds = train_ds
+        self.test_ds = test_ds
 
     def masked_loss(labels, preds):
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels, preds)
@@ -38,13 +40,12 @@ class TrainModel:
                            loss=self.masked_loss,
                            metrics=[self.masked_acc])
 
-
-        history = self.model.fit(
-            train_ds.repeat(),
+        self.model.fit(
+            self.train_ds.repeat(),
             steps_per_epoch=100,
-            validation_data=test_ds.repeat(),
+            validation_data=self.test_ds.repeat(),
             validation_steps=20,
-            epochs=100,
+            epochs=2,
             callbacks=callbacks)
 
 
@@ -61,5 +62,3 @@ class GenerateText(tf.keras.callbacks.Callback):
             result = self.model.simple_gen(self.image, temperature=t)
             print(result)
         print()
-
-

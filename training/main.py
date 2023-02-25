@@ -28,6 +28,7 @@ import tensorflow_datasets as tfds
 
 from model_components import SeqEmbedding, DecoderLayer
 from utils import TrainerClass
+from train_model import TrainModel
 
 
 class TokenOutput(tf.keras.layers.Layer):
@@ -72,7 +73,6 @@ class TokenOutput(tf.keras.layers.Layer):
 
     def call(self, x):
         x = self.dense(x)
-        # TODO(b/250038731): Fix this.
         # An Add layer doesn't work because of the different shapes.
         # This clears the mask, that's okay because it prevents keras from rescaling
         # the losses.
@@ -149,6 +149,9 @@ class Captioner(tf.keras.Model):
 
 if __name__ == '__main__':
     trainer = TrainerClass()
+    # tokenizer
+    tokenizer = trainer.tokenizer()
+
 
     choose = 'flickr8k'
 
@@ -167,8 +170,7 @@ if __name__ == '__main__':
 
     # test_img_batch = trainer.load_image(ex_path)[tf.newaxis, :]
 
-    # tokenizer
-    tokenizer = trainer.tokenizer()
+
 
     tokenizer.adapt(train_raw.map(lambda fp, txt: txt).unbatch().batch(1024))
 
@@ -190,6 +192,7 @@ if __name__ == '__main__':
     train_ds = trainer.load_dataset('train_cache')
     test_ds = trainer.load_dataset('test_cache')
 
+
     # output
     output_layer = TokenOutput(tokenizer, banned_tokens=('', '[UNK]', '[START]'))
     # This might run a little faster if the dataset didn't also have to load the image data.
@@ -199,11 +202,15 @@ if __name__ == '__main__':
     model = Captioner(tokenizer, feature_extractor=mobilenet, output_layer=output_layer,
                       units=256, dropout_rate=0.5, num_layers=2, num_heads=2)
 
-    # generate captions
-    image_url = 'https://tensorflow.org/images/surf.jpg'
-    image_path = tf.keras.utils.get_file('surf.jpg', origin=image_url)
-    image = trainer.load_image(image_path)
+    # # generate captions
+    # image_url = 'https://tensorflow.org/images/surf.jpg'
+    # image_path = tf.keras.utils.get_file('surf.jpg', origin=image_url)
+    # image = trainer.load_image(image_path)
+    #
+    # for t in (0.0, 0.5, 1.0):
+    #   result = model.simple_gen(image, temperature=t)
+    #   print(result)
 
-    for t in (0.0, 0.5, 1.0):
-      result = model.simple_gen(image, temperature=t)
-      print(result)
+    train_model = TrainModel(model=model, train_ds=train_ds, test_ds=test_ds)
+    train_model.model_train()
+    print('done')
