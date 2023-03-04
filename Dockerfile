@@ -19,6 +19,4 @@ ENV PYTHONPATH /opt
 WORKDIR /opt
 EXPOSE 8081
 
-# CMD python /opt/application/main.py
-# kill with `sudo kill $(pgrep -P PID)`
-CMD python -m uvicorn application.main:app --host 0.0.0.0 --port 8081
+CMD ["gunicorn", "application.main:app", "-c", "application/config/gunicorn_config.py", "-k", "uvicorn.workers.UvicornWorker"]
